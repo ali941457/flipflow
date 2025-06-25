@@ -1,0 +1,10 @@
+# Firebase App Distribution Configuration
+# Add this to your existing firebase.json or create a new file
+
+{
+  "appDistribution": {
+    "app": "your-firebase-app-id",
+    "groups": "testers",
+    "releaseNotes": "Bug fixes and improvements"
+  }
+} 
