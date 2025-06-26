@@ -37,10 +37,11 @@ dependencies:
   file_selector: ^1.0.3
   video_player: ^2.8.2
   google_fonts: ^6.1.0
-  firebase_core: ^3.6.0
-  firebase_auth: ^5.3.3
+  firebase_core: ^3.14.0
+  firebase_auth: ^5.6.0
   google_sign_in: ^6.2.1
   flutter_svg: ^2.0.10+1
+  firebase_ui_auth: ^1.17.0
 
 dev_dependencies:
   flutter_test:
@@ -69,7 +70,7 @@ flutter:
     - assets/images/background.png
     - assets/images/logo.png
     - assets/images/google_logo.svg
-    - assets/videos/file_example_MP4_480_1_5MG.mp4
+    # - assets/videos/file_example_MP4_480_1_5MG.mp4
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

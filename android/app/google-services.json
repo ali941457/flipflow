@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "76028322116",
-    "project_id": "flip-flow-fyp",
-    "storage_bucket": "flip-flow-fyp.firebasestorage.app"
+    "project_number": "304195718935",
+    "project_id": "flipflow-7c658",
+    "storage_bucket": "flipflow-7c658.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:76028322116:android:88b237b65761b7a5963711",
+        "mobilesdk_app_id": "1:304195718935:android:ab1139efbd70006c65b152",
         "android_client_info": {
           "package_name": "com.example.flipflow"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCvyWTmQ3-5gomPR6O2mKgIRr3lOBdQofk"
+          "current_key": "AIzaSyCWhZaBS17wXMR37-zOiQlzcuDswYF5tNE"
         }
       ],
       "services": {

@@ -2,43 +2,29 @@ import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'package:file_selector/file_selector.dart';
 import 'package:video_player/video_player.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_core/firebase_core.dart';
-import 'auth_service.dart';
-import 'google_signin_button.dart';
+import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Flipflow',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        fontFamily: GoogleFonts.montserrat().fontFamily,
+        fontFamily: 'Montserrat',
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
       home: const HomePage(),
@@ -163,7 +149,6 @@ class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _authService = AuthService();
 
   @override
   void dispose() {
@@ -181,17 +166,49 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
-      await _authService.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
+      UserCredential userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: _emailController.text,
         password: _passwordController.text,
       );
-      
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const PdfUploadScreen()),
+      User? user = userCredential.user;
+
+      if (user != null && user.emailVerified) {
+        // Proceed to the app (email is verified)
+        Navigator.pushReplacementNamed(context, '/home');
+      } else {
+        // Email not verified
+        await FirebaseAuth.instance.signOut();
+        // Show a message and offer to resend verification
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Email not verified'),
+            content: Text('Please verify your email before logging in.'),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  await user?.sendEmailVerification();
+                  Navigator.pop(context);
+                },
+                child: Text('Resend Verification Email'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('OK'),
+              ),
+            ],
+          ),
         );
       }
+    } on FirebaseAuthException catch (e) {
+      // Handle Firebase-specific error
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.message;
+        });
+      }
     } catch (e) {
+      // Handle other errors
       if (mounted) {
         setState(() {
           _errorMessage = e.toString();
@@ -215,7 +232,7 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     try {
-      await _authService.resetPassword(_emailController.text.trim());
+      // Placeholder for password reset logic
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -458,21 +475,6 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           ),
                         ),
-                        // Google Sign-In Button
-                        GoogleSignInButton(
-                          width: formWidth,
-                          onSuccess: () {
-                            Navigator.of(context).pushReplacement(
-                              MaterialPageRoute(builder: (context) => const PdfUploadScreen()),
-                            );
-                          },
-                          onError: () {
-                            setState(() {
-                              _errorMessage = 'Google sign-in failed. Please try again.';
-                            });
-                          },
-                        ),
-                        SizedBox(height: verticalSpace),
                         // Sign up link
                         SizedBox(
                           width: formWidth,
@@ -532,7 +534,6 @@ class _SignUpPageState extends State<SignUpPage> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _authService = AuthService();
 
   @override
   void dispose() {
@@ -551,11 +552,11 @@ class _SignUpPageState extends State<SignUpPage> {
     });
 
     try {
-      await _authService.signUpWithEmailAndPassword(
-        email: _emailController.text.trim(),
+      UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: _emailController.text,
         password: _passwordController.text,
       );
-      
+      await userCredential.user?.sendEmailVerification();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -567,7 +568,15 @@ class _SignUpPageState extends State<SignUpPage> {
           MaterialPageRoute(builder: (context) => const PdfUploadScreen()),
         );
       }
+    } on FirebaseAuthException catch (e) {
+      // Handle Firebase-specific error
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.message;
+        });
+      }
     } catch (e) {
+      // Handle other errors
       if (mounted) {
         setState(() {
           _errorMessage = e.toString();
@@ -830,21 +839,6 @@ class _SignUpPageState extends State<SignUpPage> {
                             ),
                           ),
                         ),
-                        // Google Sign-In Button
-                        GoogleSignInButton(
-                          width: formWidth,
-                          onSuccess: () {
-                            Navigator.of(context).pushReplacement(
-                              MaterialPageRoute(builder: (context) => const PdfUploadScreen()),
-                            );
-                          },
-                          onError: () {
-                            setState(() {
-                              _errorMessage = 'Google sign-in failed. Please try again.';
-                            });
-                          },
-                        ),
-                        SizedBox(height: verticalSpace),
                         // Back to login link
                         SizedBox(
                           width: formWidth,
@@ -898,7 +892,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   late AnimationController _logoAnimController;
   late Animation<double> _logoScaleAnim;
   late Animation<double> _logoFadeAnim;
-  final _authService = AuthService();
 
   @override
   void initState() {
@@ -907,26 +900,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _logoScaleAnim = Tween<double>(begin: 0.85, end: 1.0).animate(CurvedAnimation(parent: _logoAnimController, curve: Curves.elasticOut));
     _logoFadeAnim = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _logoAnimController, curve: Curves.easeIn));
     _logoAnimController.forward();
-    
-    // Check if user is already logged in
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkAuthState();
-    });
   }
 
   @override
   void dispose() {
     _logoAnimController.dispose();
     super.dispose();
-  }
-
-  void _checkAuthState() {
-    final user = _authService.currentUser;
-    if (user != null && mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const PdfUploadScreen()),
-      );
-    }
   }
 
   @override
@@ -1266,16 +1245,9 @@ class ResultScreen extends StatefulWidget {
 }
 
 class _ResultScreenState extends State<ResultScreen> with SingleTickerProviderStateMixin {
-  late VideoPlayerController _controller;
-  bool _isPlaying = false;
-  bool _initialized = false;
-  bool _loadError = false;
   late AnimationController _logoAnimController;
   late Animation<double> _logoScaleAnim;
   late Animation<double> _logoFadeAnim;
-  double _playBtnScale = 1.0;
-  double _downloadBtnScale = 1.0;
-  final _authService = AuthService();
 
   @override
   void initState() {
@@ -1285,61 +1257,12 @@ class _ResultScreenState extends State<ResultScreen> with SingleTickerProviderSt
     _logoScaleAnim = Tween<double>(begin: 0.85, end: 1.0).animate(CurvedAnimation(parent: _logoAnimController, curve: Curves.elasticOut));
     _logoFadeAnim = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _logoAnimController, curve: Curves.easeIn));
     _logoAnimController.forward();
-    // Video
-    _controller = VideoPlayerController.asset('assets/videos/file_example_MP4_480_1_5MG.mp4')
-      ..initialize().then((_) {
-        setState(() {
-          _initialized = true;
-        });
-      }).catchError((e) {
-        setState(() {
-          _loadError = true;
-        });
-      });
   }
 
   @override
   void dispose() {
-    _controller.dispose();
     _logoAnimController.dispose();
     super.dispose();
-  }
-
-  void _togglePlay() async {
-    setState(() => _playBtnScale = 0.85);
-    await Future.delayed(const Duration(milliseconds: 80));
-    setState(() => _playBtnScale = 1.0);
-    if (_controller.value.isPlaying) {
-      _controller.pause();
-      setState(() => _isPlaying = false);
-    } else {
-      _controller.play();
-      setState(() => _isPlaying = true);
-    }
-  }
-
-  void _onDownloadTapDown(_) => setState(() => _downloadBtnScale = 0.95);
-  void _onDownloadTapUp(_) => setState(() => _downloadBtnScale = 1.0);
-
-  Future<void> _logout() async {
-    try {
-      await _authService.signOut();
-      if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const HomePage()),
-          (route) => false,
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error logging out: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
   }
 
   @override
@@ -1349,13 +1272,6 @@ class _ResultScreenState extends State<ResultScreen> with SingleTickerProviderSt
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: _logout,
-            tooltip: 'Logout',
-          ),
-        ],
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
@@ -1387,77 +1303,36 @@ class _ResultScreenState extends State<ResultScreen> with SingleTickerProviderSt
                         ),
                       ),
                       SizedBox(height: verticalSpace),
-                      // Video preview area with fade in
-                      AnimatedOpacity(
-                        opacity: _initialized && !_loadError ? 1.0 : 0.0,
-                        duration: const Duration(milliseconds: 600),
-                        child: Container(
-                          width: cardWidth,
-                          height: cardWidth * 0.6,
-                          color: Colors.grey[300],
-                          child: _loadError
-                            ? const Center(child: Text('Failed to load video', style: TextStyle(color: Colors.red, fontSize: 16)))
-                            : Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  if (_initialized && _isPlaying)
-                                    AspectRatio(
-                                      aspectRatio: _controller.value.aspectRatio,
-                                      child: VideoPlayer(_controller),
-                                    )
-                                  else
-                                    const SizedBox.shrink(),
-                                  if (!_isPlaying)
-                                    AnimatedScale(
-                                      scale: _playBtnScale,
-                                      duration: const Duration(milliseconds: 120),
-                                      child: GestureDetector(
-                                        onTap: _togglePlay,
-                                        child: Container(
-                                          width: 90,
-                                          height: 90,
-                                          decoration: BoxDecoration(
-                                            color: Colors.white.withAlpha(180),
-                                            shape: BoxShape.circle,
-                                            border: Border.all(color: Colors.black, width: 6),
-                                          ),
-                                          child: const Center(
-                                            child: Icon(Icons.play_arrow, size: 54, color: Colors.black),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
+                      // Placeholder for removed video
+                      Container(
+                        width: cardWidth,
+                        height: cardWidth * 0.6,
+                        color: Colors.grey[300],
+                        child: const Center(
+                          child: Text(
+                            'No result video available.',
+                            style: TextStyle(color: Colors.black54, fontSize: 18),
+                          ),
                         ),
                       ),
                       SizedBox(height: verticalSpace),
-                      // Download Button with scale animation
-                      AnimatedScale(
-                        scale: _downloadBtnScale,
-                        duration: const Duration(milliseconds: 120),
-                        child: SizedBox(
-                          width: cardWidth,
-                          child: GestureDetector(
-                            onTapDown: _onDownloadTapDown,
-                            onTapUp: _onDownloadTapUp,
-                            onTapCancel: () => setState(() => _downloadBtnScale = 1.0),
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: const Color(0xFF1A2980),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(30),
-                                ),
-                                elevation: 4,
-                                padding: const EdgeInsets.symmetric(vertical: 14),
-                              ),
-                              onPressed: () {},
-                              child: const Text(
-                                'Download',
-                                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 1.1),
-                              ),
+                      // Download Button (disabled)
+                      SizedBox(
+                        width: cardWidth,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: const Color(0xFF1A2980),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
                             ),
+                            elevation: 4,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          onPressed: null,
+                          child: const Text(
+                            'Download',
+                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 1.1),
                           ),
                         ),
                       ),
@@ -1471,5 +1346,73 @@ class _ResultScreenState extends State<ResultScreen> with SingleTickerProviderSt
         },
       ),
     );
+  }
+}
+
+Future<void> signUp(String email, String password, BuildContext context) async {
+  try {
+    UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+    await userCredential.user?.sendEmailVerification();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Verify your email'),
+        content: Text('A verification email has been sent to $email. Please verify before logging in.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('OK'),
+          ),
+        ],
+      ),
+    );
+  } catch (e) {
+    // Handle signup error
+    print(e);
+  }
+}
+
+Future<void> signIn(String email, String password, BuildContext context) async {
+  try {
+    UserCredential userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+    User? user = userCredential.user;
+
+    if (user != null && user.emailVerified) {
+      // Proceed to the app (email is verified)
+      Navigator.pushReplacementNamed(context, '/home');
+    } else {
+      // Email not verified
+      await FirebaseAuth.instance.signOut();
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Email not verified'),
+          content: Text('Please verify your email before logging in.'),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await user?.sendEmailVerification();
+                Navigator.pop(context);
+              },
+              child: Text('Resend Verification Email'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
+  } catch (e) {
+    // Handle login error
+    print(e);
   }
 }
