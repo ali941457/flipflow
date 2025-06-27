@@ -6,6 +6,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:path_provider/path_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1100,9 +1104,14 @@ class PdfUploadScreen extends StatefulWidget {
 class _PdfUploadScreenState extends State<PdfUploadScreen> with SingleTickerProviderStateMixin {
   String? _fileName;
   String? _error;
+  bool _isUploading = false;
+  XFile? _selectedFile;
   late AnimationController _logoAnimController;
   late Animation<double> _logoScaleAnim;
   late Animation<double> _logoFadeAnim;
+
+  // API Configuration
+  static const String apiUrl = 'https://flipflow.onrender.com/upload'; // Update this with your actual API URL
 
   @override
   void initState() {
@@ -1134,19 +1143,83 @@ class _PdfUploadScreenState extends State<PdfUploadScreen> with SingleTickerProv
       if (isPdf) {
         setState(() {
           _fileName = file.name;
+          _selectedFile = file;
           _error = null;
         });
       } else {
         setState(() {
           _fileName = null;
+          _selectedFile = null;
           _error = 'Please select a PDF file.';
         });
       }
     } else {
       setState(() {
         _fileName = null;
+        _selectedFile = null;
         _error = 'No file selected.';
       });
+    }
+  }
+
+  Future<void> _uploadPdfAndProcess() async {
+    if (_selectedFile == null) {
+      setState(() {
+        _error = 'Please select a PDF file first.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isUploading = true;
+      _error = null;
+    });
+
+    try {
+      // Create multipart request
+      var request = http.MultipartRequest('POST', Uri.parse(apiUrl));
+      
+      // Add the PDF file
+      var file = await http.MultipartFile.fromPath(
+        'file',
+        _selectedFile!.path,
+        filename: _selectedFile!.name,
+      );
+      request.files.add(file);
+
+      // Send the request
+      var response = await request.send();
+      
+      if (response.statusCode == 200) {
+        // Success - get the video data
+        var videoBytes = await response.stream.toBytes();
+        
+        // Navigate to result screen with video data
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => ResultScreen(videoBytes: videoBytes),
+            ),
+          );
+        }
+      } else {
+        // Handle error
+        var errorResponse = await response.stream.bytesToString();
+        setState(() {
+          _error = 'Upload failed: ${response.statusCode} - $errorResponse';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _error = 'Upload failed: $e';
+      });
+      print('Upload error: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+      }
     }
   }
 
@@ -1280,15 +1353,20 @@ class _PdfUploadScreenState extends State<PdfUploadScreen> with SingleTickerProv
                               elevation: 6,
                               padding: const EdgeInsets.symmetric(vertical: 16),
                             ),
-                            onPressed: () {
-                              Navigator.of(context).pushReplacement(
-                                MaterialPageRoute(builder: (context) => const ResultScreen()),
-                              );
-                            },
-                            child: const Text(
-                              'Continue',
-                              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: Colors.white),
-                            ),
+                            onPressed: _isUploading ? null : _uploadPdfAndProcess,
+                            child: _isUploading
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  ),
+                                )
+                              : const Text(
+                                  'Convert to Video',
+                                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: Colors.white),
+                                ),
                           ),
                         ),
                         SizedBox(height: verticalSpace),
@@ -1317,7 +1395,9 @@ class _PdfUploadScreenState extends State<PdfUploadScreen> with SingleTickerProv
 
 // RESULT SCREEN
 class ResultScreen extends StatefulWidget {
-  const ResultScreen({super.key});
+  final List<int>? videoBytes;
+  
+  const ResultScreen({super.key, this.videoBytes});
 
   @override
   State<ResultScreen> createState() => _ResultScreenState();
@@ -1327,6 +1407,8 @@ class _ResultScreenState extends State<ResultScreen> with SingleTickerProviderSt
   late AnimationController _logoAnimController;
   late Animation<double> _logoScaleAnim;
   late Animation<double> _logoFadeAnim;
+  VideoPlayerController? _videoController;
+  bool _isVideoInitialized = false;
 
   @override
   void initState() {
@@ -1336,12 +1418,80 @@ class _ResultScreenState extends State<ResultScreen> with SingleTickerProviderSt
     _logoScaleAnim = Tween<double>(begin: 0.85, end: 1.0).animate(CurvedAnimation(parent: _logoAnimController, curve: Curves.elasticOut));
     _logoFadeAnim = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _logoAnimController, curve: Curves.easeIn));
     _logoAnimController.forward();
+    
+    // Initialize video if available
+    if (widget.videoBytes != null) {
+      _initializeVideo();
+    }
+  }
+
+  Future<void> _initializeVideo() async {
+    try {
+      // Create a temporary file for the video
+      final tempDir = Directory.systemTemp;
+      final tempFile = File('${tempDir.path}/converted_video.mp4');
+      await tempFile.writeAsBytes(widget.videoBytes!);
+      
+      // Initialize video controller
+      _videoController = VideoPlayerController.file(tempFile);
+      await _videoController!.initialize();
+      
+      if (mounted) {
+        setState(() {
+          _isVideoInitialized = true;
+        });
+      }
+    } catch (e) {
+      print('Error initializing video: $e');
+    }
   }
 
   @override
   void dispose() {
     _logoAnimController.dispose();
+    _videoController?.dispose();
     super.dispose();
+  }
+
+  Future<void> _downloadVideo() async {
+    if (widget.videoBytes == null) return;
+    
+    try {
+      if (kIsWeb) {
+        // For web, show instructions since direct download requires additional setup
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Video conversion completed! The video is ready for viewing.'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        // For mobile, save to downloads
+        final directory = await getApplicationDocumentsDirectory();
+        final file = File('${directory.path}/converted_video.mp4');
+        await file.writeAsBytes(widget.videoBytes!);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Video saved to: ${file.path}'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Download failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -1388,20 +1538,86 @@ class _ResultScreenState extends State<ResultScreen> with SingleTickerProviderSt
                         ),
                       ),
                       SizedBox(height: verticalSpace),
-                      // Placeholder for removed video
+                      // Video player or placeholder
                       Container(
                         width: cardWidth,
                         height: cardWidth * 0.6,
-                        color: Colors.grey[300],
-                        child: const Center(
-                          child: Text(
-                            'No result video available.',
-                            style: TextStyle(color: Colors.black54, fontSize: 18),
-                          ),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[300],
+                          borderRadius: BorderRadius.circular(16),
                         ),
+                        child: _isVideoInitialized && _videoController != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  VideoPlayer(_videoController!),
+                                  // Video controls overlay
+                                  Positioned(
+                                    bottom: 16,
+                                    left: 16,
+                                    right: 16,
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        IconButton(
+                                          onPressed: () {
+                                            setState(() {
+                                              if (_videoController!.value.isPlaying) {
+                                                _videoController!.pause();
+                                              } else {
+                                                _videoController!.play();
+                                              }
+                                            });
+                                          },
+                                          icon: Icon(
+                                            _videoController!.value.isPlaying 
+                                              ? Icons.pause 
+                                              : Icons.play_arrow,
+                                            color: Colors.white,
+                                            size: 32,
+                                          ),
+                                        ),
+                                        Text(
+                                          '${_videoController!.value.position.inSeconds}s / ${_videoController!.value.duration.inSeconds}s',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.video_library,
+                                    size: 48,
+                                    color: Colors.grey[600],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    widget.videoBytes != null 
+                                      ? 'Loading video...'
+                                      : 'No result video available.',
+                                    style: TextStyle(
+                                      color: Colors.grey[600], 
+                                      fontSize: 18,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                       ),
                       SizedBox(height: verticalSpace),
-                      // Download Button (disabled)
+                      // Download Button
                       SizedBox(
                         width: cardWidth,
                         child: ElevatedButton(
@@ -1414,9 +1630,9 @@ class _ResultScreenState extends State<ResultScreen> with SingleTickerProviderSt
                             elevation: 4,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
-                          onPressed: null,
+                          onPressed: widget.videoBytes != null ? _downloadVideo : null,
                           child: const Text(
-                            'Download',
+                            'Download Video',
                             style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 1.1),
                           ),
                         ),
