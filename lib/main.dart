@@ -27,7 +27,13 @@ class MyApp extends StatelessWidget {
         fontFamily: 'Montserrat',
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const HomePage(),
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const HomePage(),
+        '/login': (context) => const LoginPage(),
+        '/signup': (context) => const SignUpPage(),
+        '/home': (context) => const PdfUploadScreen(),
+      },
     );
   }
 }
@@ -166,52 +172,105 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
+      print('Attempting login with email: ${_emailController.text.trim()}');
+      
+      // First, try normal sign in
       UserCredential userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text,
+        email: _emailController.text.trim(),
         password: _passwordController.text,
       );
+      
+      print('Login successful, user: ${userCredential.user?.email}');
       User? user = userCredential.user;
 
-      if (user != null && user.emailVerified) {
-        // Proceed to the app (email is verified)
+      if (user != null) {
+        print('User is not null, navigating to home');
+        // Proceed to the app regardless of email verification status
+        if (!user.emailVerified) {
+          print('User email not verified, but proceeding anyway');
+          // For existing users who need verification, we'll proceed anyway
+          // Try to reload user to get latest verification status
+          try {
+            await user.reload();
+            user = FirebaseAuth.instance.currentUser;
+          } catch (e) {
+            print('Error reloading user: $e');
+          }
+        }
         Navigator.pushReplacementNamed(context, '/home');
       } else {
-        // Email not verified
-        await FirebaseAuth.instance.signOut();
-        // Show a message and offer to resend verification
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text('Email not verified'),
-            content: Text('Please verify your email before logging in.'),
-            actions: [
-              TextButton(
-                onPressed: () async {
-                  await user?.sendEmailVerification();
-                  Navigator.pop(context);
-                },
-                child: Text('Resend Verification Email'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text('OK'),
-              ),
-            ],
-          ),
-        );
+        print('User is null after successful login');
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'Login successful but user data is missing.';
+          });
+        }
       }
     } on FirebaseAuthException catch (e) {
-      // Handle Firebase-specific error
+      print('FirebaseAuthException: ${e.code} - ${e.message}');
+      
+      // If it's a verification error, try to handle it specially
+      if (e.code == 'user-not-verified') {
+        print('Handling user-not-verified error');
+        // Try to sign in again and force proceed
+        try {
+          await FirebaseAuth.instance.signOut();
+          UserCredential retryCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+            email: _emailController.text.trim(),
+            password: _passwordController.text,
+          );
+          
+          if (retryCredential.user != null) {
+            print('Retry successful, proceeding to home');
+            Navigator.pushReplacementNamed(context, '/home');
+            return;
+          }
+        } catch (retryError) {
+          print('Retry failed: $retryError');
+        }
+      }
+      
+      // Handle Firebase-specific error with user-friendly messages
+      String errorMessage;
+      switch (e.code) {
+        case 'user-not-found':
+          errorMessage = 'No account found with this email address.';
+          break;
+        case 'wrong-password':
+          errorMessage = 'Incorrect password. Please try again.';
+          break;
+        case 'invalid-email':
+          errorMessage = 'Please enter a valid email address.';
+          break;
+        case 'user-disabled':
+          errorMessage = 'This account has been disabled.';
+          break;
+        case 'too-many-requests':
+          errorMessage = 'Too many failed attempts. Please try again later.';
+          break;
+        case 'network-request-failed':
+          errorMessage = 'Network error. Please check your internet connection.';
+          break;
+        case 'user-not-verified':
+          // For existing users who need verification, try to proceed anyway
+          errorMessage = 'Please try logging in again. Email verification is not required.';
+          break;
+        default:
+          errorMessage = 'Firebase error: ${e.message ?? 'Unknown error'}';
+      }
+      
       if (mounted) {
         setState(() {
-          _errorMessage = e.message;
+          _errorMessage = errorMessage;
         });
       }
     } catch (e) {
       // Handle other errors
+      print('Unexpected error during login: $e');
+      print('Error type: ${e.runtimeType}');
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString();
+          _errorMessage = 'An unexpected error occurred: ${e.toString()}';
         });
       }
     } finally {
@@ -553,35 +612,55 @@ class _SignUpPageState extends State<SignUpPage> {
 
     try {
       UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailController.text,
+        email: _emailController.text.trim(),
         password: _passwordController.text,
       );
-      await userCredential.user?.sendEmailVerification();
+      // No email verification required - proceed directly
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Account created successfully!'),
+            content: Text('Account created successfully! Please log in.'),
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const PdfUploadScreen()),
-        );
+        Navigator.of(context).pushReplacementNamed('/login');
       }
     } on FirebaseAuthException catch (e) {
-      // Handle Firebase-specific error
+      // Handle Firebase-specific error with user-friendly messages
+      String errorMessage;
+      switch (e.code) {
+        case 'email-already-in-use':
+          errorMessage = 'An account with this email already exists.';
+          break;
+        case 'invalid-email':
+          errorMessage = 'Please enter a valid email address.';
+          break;
+        case 'weak-password':
+          errorMessage = 'Password is too weak. Please choose a stronger password.';
+          break;
+        case 'operation-not-allowed':
+          errorMessage = 'Email/password accounts are not enabled.';
+          break;
+        case 'network-request-failed':
+          errorMessage = 'Network error. Please check your internet connection.';
+          break;
+        default:
+          errorMessage = e.message ?? 'An error occurred during sign up.';
+      }
+      
       if (mounted) {
         setState(() {
-          _errorMessage = e.message;
+          _errorMessage = errorMessage;
         });
       }
     } catch (e) {
       // Handle other errors
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString();
+          _errorMessage = 'An unexpected error occurred. Please try again.';
         });
       }
+      print('Sign up error: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -1272,6 +1351,12 @@ class _ResultScreenState extends State<ResultScreen> with SingleTickerProviderSt
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () {
+            Navigator.of(context).pushReplacementNamed('/home');
+          },
+        ),
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
@@ -1384,32 +1469,9 @@ Future<void> signIn(String email, String password, BuildContext context) async {
     );
     User? user = userCredential.user;
 
-    if (user != null && user.emailVerified) {
-      // Proceed to the app (email is verified)
+    if (user != null) {
+      // Proceed to the app (no email verification required)
       Navigator.pushReplacementNamed(context, '/home');
-    } else {
-      // Email not verified
-      await FirebaseAuth.instance.signOut();
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text('Email not verified'),
-          content: Text('Please verify your email before logging in.'),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                await user?.sendEmailVerification();
-                Navigator.pop(context);
-              },
-              child: Text('Resend Verification Email'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('OK'),
-            ),
-          ],
-        ),
-      );
     }
   } catch (e) {
     // Handle login error
